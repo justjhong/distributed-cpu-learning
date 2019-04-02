@@ -31,7 +31,7 @@ trainset = torchvision.datasets.CIFAR10(root='./datasets', train=True, download=
 # trainset_size = len(trainset)
 
 # for subset of trainset
-sample_indices = torch.randperm(len(trainset))[:64*5]
+sample_indices = torch.randperm(len(trainset))[:args.batch_size*2]
 sampler = torch.utils.data.sampler.BatchSampler(torch.utils.data.sampler.SubsetRandomSampler(sample_indices), args.batch_size, drop_last=True)
 trainset_loader = torch.utils.data.DataLoader(trainset, batch_sampler=sampler)
 trainset_size = len(sample_indices)
@@ -54,19 +54,24 @@ def initialize_net(weight_dict=None):
     return model
 
 def train_model(model, dataloader, criterion, optimizer, num_epochs):
-    param_update_dict=dict(list(model.named_parameters()))
+    cur_param_update_dict=dict(list(model.named_parameters()))
+    param_update_dict={x: cur_param_update_dict[x].clone() for x in cur_param_update_dict}
+    model.train()
     for epoch in range(num_epochs):
-        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
+        print('Epoch {}/{}'.format(epoch + 1, num_epochs))
         print('-' * 10)
-        batch_i = 0
-        for inputs, labels in dataloader:
-            print('Batch {}/{}'.format(batch_i, trainset_size // args.batch_size))
+        for batch_i, (inputs, labels) in enumerate(dataloader):
+            print('Batch {}/{}'.format(batch_i + 1, trainset_size // args.batch_size))
             optimizer.zero_grad()
+            print(" opt")
             outputs = model(inputs)
+            print(" forward done")
             loss = criterion(outputs, labels)
+            print(" loss calc")
             loss.backward()
+            print(" backward done")
             optimizer.step()
-            batch_i += 1
+            print(" opt step done")
     trained_dict=dict(list(model.named_parameters()))
     for x in trained_dict:
         if x in param_update_dict:
