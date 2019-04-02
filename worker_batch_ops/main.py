@@ -19,7 +19,7 @@ random.seed(args.seed)
 
 # for CIFAR-10
 num_classes = 10
-input_size = 32*32
+input_size = 32
 
 trainset = torchvision.datasets.CIFAR10(root='./datasets', train=True, download=True, transform=transforms.Compose([
     transforms.RandomResizedCrop(input_size),
