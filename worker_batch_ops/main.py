@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchvision
-import trochvision.transforms as transforms
-from torchvision.models.squeeznet import SqueezeNet, squeezenet1_1
+import torchvision.transforms as transforms
+from torchvision.models.squeezenet import SqueezeNet, squeezenet1_1
 import numpy as np
 import argparse
 import random
@@ -27,7 +27,15 @@ trainset = torchvision.datasets.CIFAR10(root='./datasets', train=True, download=
     transforms.ToTensor(),
     transforms.Normalize((0.491399689874, 0.482158419622, 0.446530924224), (0.247032237587, 0.243485133253, 0.261587846975))
 ]))
-trainset_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True)
+# trainset_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True)
+# trainset_size = len(trainset)
+
+# for subset of trainset
+sample_indices = torch.randperm(len(trainset))[:64*5]
+sampler = torch.utils.data.sampler.BatchSampler(torch.utils.data.sampler.SubsetRandomSampler(sample_indices), args.batch_size, drop_last=True)
+trainset_loader = torch.utils.data.DataLoader(trainset, batch_sampler=sampler)
+trainset_size = len(sample_indices)
+
 
 # testset = torchvision.datasets.CIFAR10(root='./datasets', train=False, download=True, transform=transforms.Compose([
 #     transforms.Resize(input_size),
@@ -37,7 +45,7 @@ trainset_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_si
 # ]))
 # testset_loader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=True)
 
-def intialize_net(weight_dict=None):
+def initialize_net(weight_dict=None):
     model = squeezenet1_1(pretrained=weight_dict is None)
     model.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1,1), stride=(1,1))
     model.num_classes = num_classes
@@ -46,21 +54,32 @@ def intialize_net(weight_dict=None):
     return model
 
 def train_model(model, dataloader, criterion, optimizer, num_epochs):
-    param_update_dict={}
+    param_update_dict=dict(list(model.named_parameters()))
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
+        batch_i = 0
         for inputs, labels in dataloader:
+            print('Batch {}/{}'.format(batch_i, trainset_size // args.batch_size))
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-    ## figure out how to get param updates
+            batch_i += 1
+    trained_dict=dict(list(model.named_parameters()))
+    for x in trained_dict:
+        if x in param_update_dict:
+            param_update_dict[x].sub_(trained_dict[x])
+            param_update_dict[x].mul_(-1)
     return param_update_dict
 
-def __main__():
+def main():
     model = initialize_net()
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.adam(model.parameters(), lr=args.learning_rate)
-    train_model(model, trainset_loader, criterion, optimizer, args.epoch)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    param_update_dict = train_model(model, trainset_loader, criterion, optimizer, args.epoch)
+    print(param_update_dict)
+
+if __name__ == '__main__':
+    main()
