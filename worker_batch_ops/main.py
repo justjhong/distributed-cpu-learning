@@ -22,7 +22,6 @@ num_classes = 10
 input_size = 32
 
 trainset = torchvision.datasets.CIFAR10(root='./datasets', train=True, download=True, transform=transforms.Compose([
-    transforms.RandomResizedCrop(input_size),
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
     transforms.Normalize((0.491399689874, 0.482158419622, 0.446530924224), (0.247032237587, 0.243485133253, 0.261587846975))
@@ -38,8 +37,6 @@ trainset_size = len(sample_indices)
 
 
 # testset = torchvision.datasets.CIFAR10(root='./datasets', train=False, download=True, transform=transforms.Compose([
-#     transforms.Resize(input_size),
-#     transforms.CenterCrop(input_size),
 #     transforms.ToTensor(),
 #     transforms.Normalize((0.491399689874, 0.482158419622, 0.446530924224), (0.247032237587, 0.243485133253, 0.261587846975))
 # ]))
