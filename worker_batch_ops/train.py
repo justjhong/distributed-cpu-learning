@@ -1,5 +1,5 @@
 #*
-# @file ABSA training driver based on arxiv:1810.01021 
+# @file ABSA training driver based on arxiv:1810.01021
 # Copyright (c) Zhewei Yao, Amir Gholami
 # All rights reserved.
 # This file is part of HessianFlow library.
@@ -88,13 +88,13 @@ model_list = {
 
 model = model_list[args.arch]
 
-criterion = nn.CrossEntropyLoss() 
+criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
 
-########### training  
+########### training
 if args.method == 'absa':
     model, num_updates=hf_optm.absa(model, train_loader, hessian_loader, test_loader, criterion, optimizer, args.epochs, args.lr_decay_epoch, args.lr_decay,
         batch_size = args.batch_size, max_large_ratio = args.large_ratio, adv_ratio = 0.2, eps = 0.005, print_flag = True)
 elif args.method == 'sgd':
-    model, num_updates = hf_optm.baseline(model, train_loader, test_loader, criterion, optimizer, args.epochs, args.lr_decay_epoch, 
+    model, num_updates = hf_optm.baseline(model, train_loader, test_loader, criterion, optimizer, args.epochs, args.lr_decay_epoch,
             args.lr_decay, batch_size = args.batch_size, max_large_ratio = args.large_ratio)
