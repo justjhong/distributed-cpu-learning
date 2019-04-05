@@ -30,17 +30,17 @@ trainset = torchvision.datasets.CIFAR10(root='./datasets', train=True, download=
 # trainset_size = len(trainset)
 
 # for subset of trainset
-sample_indices = torch.randperm(len(trainset))[:args.batch_size*2]
+sample_indices = torch.randperm(len(trainset))[:args.batch_size*10]
 sampler = torch.utils.data.sampler.BatchSampler(torch.utils.data.sampler.SubsetRandomSampler(sample_indices), args.batch_size, drop_last=True)
 trainset_loader = torch.utils.data.DataLoader(trainset, batch_sampler=sampler)
 trainset_size = len(sample_indices)
 
 
-# testset = torchvision.datasets.CIFAR10(root='./datasets', train=False, download=True, transform=transforms.Compose([
-#     transforms.ToTensor(),
-#     transforms.Normalize((0.491399689874, 0.482158419622, 0.446530924224), (0.247032237587, 0.243485133253, 0.261587846975))
-# ]))
-# testset_loader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=True)
+testset = torchvision.datasets.CIFAR10(root='./datasets', train=False, download=True, transform=transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.491399689874, 0.482158419622, 0.446530924224), (0.247032237587, 0.243485133253, 0.261587846975))
+]))
+testset_loader = torch.utils.data.DataLoader(testset, batch_size=256, shuffle=True)
 
 def initialize_net(weight_dict=None):
     model = squeezenet1_1(pretrained=weight_dict is None)
@@ -50,25 +50,40 @@ def initialize_net(weight_dict=None):
         model.load_state_dict(weight_dict)
     return model
 
-def train_model(model, dataloader, criterion, optimizer, num_epochs):
+def train_model(model, trainset_loader, testset_loader, criterion, optimizer, num_epochs):
+    val_acc_history = []
+    val_loss_history = []
+    testset_iterator = iter(testset_loader)
     cur_param_update_dict=dict(list(model.named_parameters()))
     param_update_dict={x: cur_param_update_dict[x].clone() for x in cur_param_update_dict}
-    model.train()
     for epoch in range(num_epochs):
+        model.train()
         print('Epoch {}/{}'.format(epoch + 1, num_epochs))
         print('-' * 10)
-        for batch_i, (inputs, labels) in enumerate(dataloader):
+        running_loss = 0.0
+        for batch_i, (inputs, labels) in enumerate(trainset_loader):
             print('Batch {}/{}'.format(batch_i + 1, trainset_size // args.batch_size))
             optimizer.zero_grad()
-            print(" opt")
             outputs = model(inputs)
-            print(" forward done")
             loss = criterion(outputs, labels)
-            print(" loss calc")
             loss.backward()
-            print(" backward done")
             optimizer.step()
-            print(" opt step done")
+            running_loss += loss.item()
+        running_loss /= trainset_size / args.batch_size
+        print("Training loss is {}".format(running_loss))
+        model.eval()
+        try:
+            inputs, labels = next(testset_iterator)
+        except StopIteration:
+            testset_iterator = iter(testset_loader)
+            inputs, labels = next(testset_iterator)
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        accuracy = outputs.data.max(1)[1].eq(labels).sum().item() / outputs.data.shape[0]
+        print('-' * 5)
+        print("Test loss is {}".format(loss.item()))
+        print("Test accuracy is {}".format(accuracy))
+        val_loss_history.append(loss)
     trained_dict=dict(list(model.named_parameters()))
     for x in trained_dict:
         if x in param_update_dict:
@@ -80,8 +95,9 @@ def main():
     model = initialize_net()
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    param_update_dict = train_model(model, trainset_loader, criterion, optimizer, args.epoch)
-    print(param_update_dict)
+    param_update_dict = train_model(model, trainset_loader, testset_loader, criterion, optimizer, args.epoch)
+    # print(param_update_dict)
+    return
 
 if __name__ == '__main__':
     main()
