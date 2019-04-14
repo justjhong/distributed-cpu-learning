@@ -28,10 +28,15 @@ from torchvision import datasets, transforms
 from torch.autograd import Variable
 from models.squeezenet import *
 from models.resnet import *
+from mpi4pi import MPI
 from utils import *
 
 import hessianflow as hf
 import hessianflow.optimizer as hf_optm
+
+import sys
+sys.path.insert(0, '/path/to/application/app/folder')
+import main
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch Example')
@@ -43,6 +48,9 @@ parser.add_argument('--test-batch-size', type=int, default=200, metavar='TBS',
                     help = 'input batch size for testing (default: 1000)')
 parser.add_argument('--epochs', type = int, default = 90, metavar = 'E',
                     help = 'number of epochs to train (default: 10)')
+
+parser.add_argument('--num-iter', type = int, default = 100, metavar = 'NI',
+                    help = 'number of update iterations with param synchronization')
 
 parser.add_argument('--lr', type = float, default = 0.1, metavar = 'LR',
                     help = 'learning rate (default: 0.01)')
@@ -68,16 +76,21 @@ args = parser.parse_args()
 # set random seed to reproduce the work
 torch.manual_seed(args.seed)
 
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size = comm.Get_size()
 
-# get dataset
-train_loader, test_loader = getData(name = args.name, train_bs = args.batch_size, test_bs = args.test_batch_size)
+# Rank 0 is parameter server, else is worker
+if rank > 0:
+    # get dataset
+    train_loader, test_loader = getData(name = args.name, train_bs = args.batch_size, test_bs = args.test_batch_size)
 
-transform_train = transforms.Compose([
-        transforms.ToTensor(),
-    ])
+    transform_train = transforms.Compose([
+            transforms.ToTensor(),
+        ])
 
-trainset = datasets.CIFAR10(root='../datasets', train = True, download = True, transform = transform_train)
-hessian_loader = torch.utils.data.DataLoader(trainset, batch_size = 128, shuffle = True)
+    trainset = datasets.CIFAR10(root='../datasets', train = True, download = True, transform = transform_train)
+    hessian_loader = torch.utils.data.DataLoader(trainset, batch_size = 128, shuffle = True)
 
 
 # get model and optimizer
@@ -92,9 +105,29 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
 
 ########### training
-if args.method == 'absa':
-    model, num_updates=hf_optm.absa(model, train_loader, hessian_loader, test_loader, criterion, optimizer, args.epochs, args.lr_decay_epoch, args.lr_decay,
-        batch_size = args.batch_size, max_large_ratio = args.large_ratio, adv_ratio = 0.2, eps = 0.005, print_flag = True)
-elif args.method == 'sgd':
-    model, num_updates = hf_optm.baseline(model, train_loader, test_loader, criterion, optimizer, args.epochs, args.lr_decay_epoch,
-            args.lr_decay, batch_size = args.batch_size, max_large_ratio = args.large_ratio)
+if rank > 0:
+    for i in range(args.num_iter):
+        # training needs to be changed to only run one or a few minibatches, then sync with param server
+        if args.method == 'absa':
+            model, num_updates=hf_optm.absa(model, train_loader, hessian_loader, test_loader, criterion, optimizer, args.epochs, args.lr_decay_epoch, args.lr_decay,
+                batch_size = args.batch_size, max_large_ratio = args.large_ratio, adv_ratio = 0.2, eps = 0.005, print_flag = True)
+        elif args.method == 'sgd':
+            model, num_updates = hf_optm.baseline(model, train_loader, test_loader, criterion, optimizer, args.epochs, args.lr_decay_epoch,
+                    args.lr_decay, batch_size = args.batch_size, max_large_ratio = args.large_ratio)
+        
+        ## Update with server
+        
+        # First all send state_dicts to param server
+        comm.gather(model.state_dict(), root = 0)
+
+        # Then receive averaged model from param server, change current model to param server model.
+        new_state_dict = comm.bcast(None, root = 0)
+
+        state_dict = model.state_dict()
+
+        for name, param in new_state_dict.items():
+            state_dict[name].copy_(param)
+
+else:
+    # Put parameter server code here
+    train_from_pretrained(args.num_iter)
