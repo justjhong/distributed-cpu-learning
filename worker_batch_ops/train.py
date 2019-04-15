@@ -26,27 +26,29 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
-from models.squeezenet import *
-from models.resnet import *
-from mpi4pi import MPI
-from utils import *
+from torchvision.models.squeezenet import *
+# from torchvision.models.resnet import *
 
 import hessianflow as hf
 import hessianflow.optimizer as hf_optm
-
-import sys
-sys.path.insert(0, '/path/to/application/app/folder')
-import main
+from utils import *
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch Example')
+
+# for MPI
+parser.add_argument('--rank', type = int, metavar = 'R',
+                    help = 'rank for MPI')
+parser.add_argument('--size', type = int, metavar = 'SZ',
+                    help = 'size for MPI')
+
 parser.add_argument('--name', type = str, default = 'cifar10', metavar = 'N',
                     help = 'dataset')
 parser.add_argument('--batch-size', type = int, default = 128, metavar = 'B',
                     help = 'input batch size for training (default: 64)')
 parser.add_argument('--test-batch-size', type=int, default=200, metavar='TBS',
                     help = 'input batch size for testing (default: 1000)')
-parser.add_argument('--epochs', type = int, default = 90, metavar = 'E',
+parser.add_argument('--epochs', type = int, default = 10, metavar = 'E',
                     help = 'number of epochs to train (default: 10)')
 
 parser.add_argument('--num-iter', type = int, default = 100, metavar = 'NI',
@@ -76,9 +78,8 @@ args = parser.parse_args()
 # set random seed to reproduce the work
 torch.manual_seed(args.seed)
 
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-size = comm.Get_size()
+rank = args.rank
+size = args.size
 
 # Rank 0 is parameter server, else is worker
 if rank > 0:
@@ -95,8 +96,8 @@ if rank > 0:
 
 # get model and optimizer
 model_list = {
-    'SqueezeNet': squeezenet(),
-    'ResNet': resnet(depth = args.depth),
+    'SqueezeNet': squeezenet1_1(),
+    # 'ResNet': resnet(depth = args.depth),
 }
 
 model = model_list[args.arch]
@@ -114,9 +115,9 @@ if rank > 0:
         elif args.method == 'sgd':
             model, num_updates = hf_optm.baseline(model, train_loader, test_loader, criterion, optimizer, args.epochs, args.lr_decay_epoch,
                     args.lr_decay, batch_size = args.batch_size, max_large_ratio = args.large_ratio)
-        
+
         ## Update with server
-        
+
         # First all send state_dicts to param server
         comm.gather(model.state_dict(), root = 0)
 
@@ -128,6 +129,6 @@ if rank > 0:
         for name, param in new_state_dict.items():
             state_dict[name].copy_(param)
 
-else:
-    # Put parameter server code here
-    train_from_pretrained(args.num_iter)
+# else:
+#     # Put parameter server code here
+#     train_from_pretrained(args.num_iter)

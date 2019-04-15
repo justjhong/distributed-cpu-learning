@@ -23,12 +23,12 @@ class ParameterServer:
 
         # requests full weights from all the workers
         # by averaging all the weights, it is the same as averaging gradient update
-        updates = self.mpi_comm.Gather(None, root = 0)
+        updates = self.mpi_comm.gather(None, root = 0)
 
         self.perform_weight_update(updates)
 
         # sends weights back to worker nodes
-        self.mpi_comm.Bcast(self.state_dict, root = 0)
+        self.mpi_comm.bcast(self.state_dict, root = 0)
 
 # start training from pretrained parameters
 def train_from_pretrained(num_iter):
