@@ -19,7 +19,6 @@
 #*
 from __future__ import print_function
 import numpy as np
-import argparse
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -27,108 +26,83 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
 from torchvision.models.squeezenet import *
+from mpi4py import MPI
 # from torchvision.models.resnet import *
 
-import hessianflow as hf
-import hessianflow.optimizer as hf_optm
-from utils import *
+from worker_batch_ops.utils import *
+from worker_batch_ops.hessianflow.optimizer.progressbar import progress_bar
+from worker_batch_ops.hessianflow.optimizer.optm_utils import exp_lr_scheduler, test
 
-# Training settings
-parser = argparse.ArgumentParser(description='PyTorch Example')
+def train(mpi_comm, rank, size, update_interval=1, batch_size=128, test_batch_size=200, epochs=10, lr=0.1, lr_decay=0.2, lr_decay_epoch=[30,60,90], seed=1, arch="SqueezeNet", depth=20):
+    # set random seed to reproduce the work
+    torch.manual_seed(seed)
 
-# for MPI
-parser.add_argument('--rank', type = int, metavar = 'R',
-                    help = 'rank for MPI')
-parser.add_argument('--size', type = int, metavar = 'SZ',
-                    help = 'size for MPI')
+    # Rank 0 is parameter server, else is worker
+    if rank > 0:
+        # get dataset
+        train_loader, test_loader = getData(name = 'cifar10', train_bs = batch_size, test_bs = test_batch_size)
 
-parser.add_argument('--name', type = str, default = 'cifar10', metavar = 'N',
-                    help = 'dataset')
-parser.add_argument('--batch-size', type = int, default = 128, metavar = 'B',
-                    help = 'input batch size for training (default: 64)')
-parser.add_argument('--test-batch-size', type=int, default=200, metavar='TBS',
-                    help = 'input batch size for testing (default: 1000)')
-parser.add_argument('--epochs', type = int, default = 10, metavar = 'E',
-                    help = 'number of epochs to train (default: 10)')
+        transform_train = transforms.Compose([
+                transforms.ToTensor(),
+            ])
 
-parser.add_argument('--num-iter', type = int, default = 100, metavar = 'NI',
-                    help = 'number of update iterations with param synchronization')
-
-parser.add_argument('--lr', type = float, default = 0.1, metavar = 'LR',
-                    help = 'learning rate (default: 0.01)')
-parser.add_argument('--lr-decay', type = float, default = 0.2,
-                    help = 'learning rate ratio')
-parser.add_argument('--lr-decay-epoch', type = int, nargs = '+', default = [30, 60, 90],
-                        help = 'Decrease learning rate at these epochs.')
+        trainset = datasets.CIFAR10(root='../datasets', train = True, download = True, transform = transform_train)
+        hessian_loader = torch.utils.data.DataLoader(trainset, batch_size = 128, shuffle = True)
 
 
-parser.add_argument('--seed', type = int, default = 1, metavar = 'S',
-                    help = 'random seed (default: 1)')
-parser.add_argument('--arch', type = str, default = 'SqueezeNet',
-            help = 'choose the archtecure')
-parser.add_argument('--large-ratio', type = int, default = 128,
-                    help = 'large ratio')
-parser.add_argument('--depth', type = int, default = 20,
-            help = 'choose the depth of resnet')
+    # get model and optimizer
+    model_list = {
+        'SqueezeNet': lambda: squeezenet1_1(),
+        'ResNet': lambda: resnet(depth = depth),
+    }
 
-parser.add_argument('--method', type = str, default = 'sgd',
-            help = 'choose the method to train you model')
+    model = model_list[arch]()
 
-args = parser.parse_args()
-# set random seed to reproduce the work
-torch.manual_seed(args.seed)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
 
-rank = args.rank
-size = args.size
+    ########### training
+    if rank > 0:
+        # large_ratio = max_large_ratio
+        # large_ratio originally used to prevent large batches from overloading memory, instead memory split amongst machines
+        for epoch in range(1, epochs + 1):
+            print('\nCurrent Epoch: ', epoch)
+            print('\nTraining')
+            train_loss = 0.
+            total_num = 0.
+            correct = 0.
 
-# Rank 0 is parameter server, else is worker
-if rank > 0:
-    # get dataset
-    train_loader, test_loader = getData(name = args.name, train_bs = args.batch_size, test_bs = args.test_batch_size)
+            for batch_idx, (data, target) in enumerate(train_loader):
+                if target.size(0) < 128:
+                    continue
+                model.train()
+                output = model(data)
+                loss = criterion(output, target)
+                loss.backward()
+                train_loss += loss.item()*target.size(0)
+                total_num += target.size(0)
+                _, predicted = output.max(1)
+                correct += predicted.eq(target).sum().item()
+                optimizer.step()
+                optimizer.zero_grad()
 
-    transform_train = transforms.Compose([
-            transforms.ToTensor(),
-        ])
+                if batch_idx % update_interval == update_interval - 1:
+                    # update server
+                    weights = model.state_dict()
+                    mpi_comm.gather(weights, root = 0)
+                    mpi_comm.Barrier()
+                    # Then receive averaged model from param server, change current model to param server model.
+                    new_state_dict = None
+                    print("Waiting on broadcast")
+                    mpi_comm.Barrier()
+                    model.load_state_dict(new_state_dict)
 
-    trainset = datasets.CIFAR10(root='../datasets', train = True, download = True, transform = transform_train)
-    hessian_loader = torch.utils.data.DataLoader(trainset, batch_size = 128, shuffle = True)
+                progress_bar(batch_idx, len(train_loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                             % (train_loss / total_num,
+                                100. * correct / total_num, correct, total_num))
 
+            if epoch in lr_decay_epoch:
+                exp_lr_scheduler(optimizer, decay_ratio=lr_decay_ratio)
 
-# get model and optimizer
-model_list = {
-    'SqueezeNet': squeezenet1_1(),
-    # 'ResNet': resnet(depth = args.depth),
-}
-
-model = model_list[args.arch]
-
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
-
-########### training
-if rank > 0:
-    for i in range(args.num_iter):
-        # training needs to be changed to only run one or a few minibatches, then sync with param server
-        if args.method == 'absa':
-            model, num_updates=hf_optm.absa(model, train_loader, hessian_loader, test_loader, criterion, optimizer, args.epochs, args.lr_decay_epoch, args.lr_decay,
-                batch_size = args.batch_size, max_large_ratio = args.large_ratio, adv_ratio = 0.2, eps = 0.005, print_flag = True)
-        elif args.method == 'sgd':
-            model, num_updates = hf_optm.baseline(model, train_loader, test_loader, criterion, optimizer, args.epochs, args.lr_decay_epoch,
-                    args.lr_decay, batch_size = args.batch_size, max_large_ratio = args.large_ratio)
-
-        ## Update with server
-
-        # First all send state_dicts to param server
-        comm.gather(model.state_dict(), root = 0)
-
-        # Then receive averaged model from param server, change current model to param server model.
-        new_state_dict = comm.bcast(None, root = 0)
-
-        state_dict = model.state_dict()
-
-        for name, param in new_state_dict.items():
-            state_dict[name].copy_(param)
-
-# else:
-#     # Put parameter server code here
-#     train_from_pretrained(args.num_iter)
+            # test on master instead
+            # test(model, test_loader)

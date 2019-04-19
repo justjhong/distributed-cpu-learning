@@ -23,22 +23,27 @@ class ParameterServer:
 
         # requests full weights from all the workers
         # by averaging all the weights, it is the same as averaging gradient update
-        updates = self.mpi_comm.gather(None, root = 0)
+        weights = None
+        print("Waiting on weights")
+        self.mpi_comm.Barrier()
+        print("Gathered weights")
 
-        self.perform_weight_update(updates)
+        self.perform_weight_update(weights)
 
         # sends weights back to worker nodes
-        self.mpi_comm.bcast(self.state_dict, root = 0)
+        new_state_dict = self.state_dict
+        self.mpi_comm.bcast(new_state_dict, root = 0)
+        self.mpi_comm.Barrier()
+        print("Broadcasted weights")
 
 # start training from pretrained parameters
-def train_from_pretrained(num_iter):
+def train_from_pretrained(comm):
     print("hello")
     model = squeezenet1_1(pretrained=True)
 
-    comm = MPI.COMM_WORLD
     num_workers = comm.Get_size() - 1
 
-    pserver = ParameterServer(dict(list(model.named_parameters())), num_workers, comm)
-    for i in range(num_iter):
+    pserver = ParameterServer(model.state_dict(), num_workers, comm)
+    for i in range(5):
         pserver.request_updates()
     return pserver
