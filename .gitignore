@@ -1,3 +1,4 @@
 env/*
 datasets/
 __pycache__/
+results/*

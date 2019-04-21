@@ -5,6 +5,8 @@ from torchvision import datasets, transforms
 from torchvision.models.squeezenet import *
 import horovod.torch as hvd
 from hessianflow.eigen import get_eigen
+import matplotlib.pyplot as plt
+import time
 
 # Initialize Horovod
 hvd.init()
@@ -59,6 +61,13 @@ optimizer.zero_grad()
 hvd.broadcast_parameters(model.state_dict(), root_rank=0)
 hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
+# Keep track of losses
+train_file = "train_loss_" + str(hvd.rank())
+test_file = "test_loss"
+start_time = time.clock()
+train_losses = []
+test_losses = []
+
 criterion = nn.CrossEntropyLoss()
 testset_iterator = iter(test_loader)
 hessian_iterator = iter(hessian_loader)
@@ -79,6 +88,7 @@ for epoch in range(1):
             optimizer.zero_grad()
             if batch_idx * large_ratio % 25 == 0:
                 print('Train Epoch: {} [{}/{}]\tLoss: {}'.format(epoch, batch_idx * len(data), len(train_sampler), large_batch_loss))
+                train_losses.append((time.clock() - start_time, epoch, batch_idx, loss.item()))
             large_batch_loss = 0
         if batch_idx % 100 == 0:
             model.eval()
@@ -97,6 +107,7 @@ for epoch in range(1):
             if hvd.rank() == 0:
                 print("Test loss is {}".format(loss))
                 print("Test accuracy is {}".format(accuracy))
+                test_losses.append((time.clock() - start_time, epoch, batch_idx, loss))
 
     if batch_update_flag:
         try:
@@ -114,3 +125,26 @@ for epoch in range(1):
             if large_ratio  >= max_large_ratio:
                 large_ratio = max_large_ratio
                 batch_update_flag = False
+
+def plot_loss(losses, file_name):
+  data_file = "./results/" + file_name
+  plot_file = data_file + "_graph.png"
+  f = open(data_file, "w")
+  f.write("time, epoch, batch_idx, loss\n")
+  for loss in losses:
+    f.write("{}, {}, {}, {}\n".format(loss[0], loss[1], loss[2], loss[3]))
+  f.close()
+
+  # Plot loss vs time
+  plt.plot([loss[3] for loss in losses], [loss[0] for loss in losses], label=file_name)
+  plt.ylabel("Loss")
+  plt.xlabel("Time in seconds")
+  plt.savefig(plot_file)
+  plt.clf()
+
+# Make train plot
+plot_loss(train_losses, train_file)
+
+if hvd.rank() == 0:
+  # Make test plot
+  plot_loss(test_losses, test_file)
