@@ -2,6 +2,7 @@ import torch
 import math
 from torch.autograd import Variable
 import numpy as np
+import horovod.torch as hvd
 
 from .utils import *
 
@@ -23,13 +24,15 @@ def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3):
     params, gradsH = get_params_grad(model)
     v = [torch.randn(p.size()) for p in params]
     v = normalization(v)
+    hvd.broadcast_variables(v, root_rank=0, name='random vector initialization')
 
     eigenvalue = None
 
     for i in range(maxIter):
         model.zero_grad()
         Hv = hessian_vector_product(gradsH, params, v)
-        eigenvalue_tmp = group_product(Hv, v).cpu().item()
+        hvd.all_reduce(Hv, name='reduce random vector update')
+        eigenvalue_tmp = group_product(Hv, v).item()
         v = normalization(Hv)
         if eigenvalue == None:
             eigenvalue = eigenvalue_tmp

@@ -48,6 +48,7 @@ criterion = nn.CrossEntropyLoss()
 testset_iterator = iter(test_loader)
 for epoch in range(1):
    for batch_idx, (data, target) in enumerate(train_loader):
+       model.train()
        output = model(data)
        loss = criterion(output, target)
        loss.backward()
@@ -57,6 +58,7 @@ for epoch in range(1):
            print('Train Epoch: {} [{}/{}]\tLoss: {}'.format(
                epoch, batch_idx * len(data), len(train_sampler), loss.item()))
        if batch_idx % 100 == 0:
+           model.eval()
            try:
                inputs, labels = next(testset_iterator)
            except StopIteration:
