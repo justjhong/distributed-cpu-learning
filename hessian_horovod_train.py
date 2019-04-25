@@ -65,9 +65,11 @@ hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 # Keep track of losses
 train_file = "train_loss_" + str(hvd.rank())
 test_file = "test_loss"
+test_acc_file = "test_acc"
 start_time = time.clock()
 train_losses = []
 test_losses = []
+test_accs = []
 
 criterion = nn.CrossEntropyLoss()
 testset_iterator = iter(test_loader)
@@ -111,6 +113,7 @@ for epoch in range(5):
                 print("Test loss is {}".format(loss))
                 print("Test accuracy is {}".format(accuracy))
                 test_losses.append((time.clock() - start_time, epoch, batch_idx, loss))
+                test_accs.append((time.clock() - start_time, epoch, batch_idx, accuracy))
 
     if batch_update_flag:
         try:
@@ -130,7 +133,7 @@ for epoch in range(5):
                 batch_update_flag = False
         print("Eigenvalue approximated at {}. Updated batch size is {}".format(eig, init_batch_size * large_ratio))
 
-def plot_loss(losses, file_name):
+def plot_loss(losses, file_name, y_axis = "Loss"):
   data_file = "./results/" + file_name
   plot_file = data_file + "_graph.png"
   f = open(data_file, "w")
@@ -141,7 +144,7 @@ def plot_loss(losses, file_name):
 
   # Plot loss vs time
   plt.plot([loss[3] for loss in losses], [loss[0] for loss in losses], label=file_name)
-  plt.ylabel("Loss")
+  plt.ylabel(y_axis)
   plt.xlabel("Time in seconds")
   plt.savefig(plot_file)
   plt.clf()
@@ -152,3 +155,4 @@ plot_loss(train_losses, train_file)
 if hvd.rank() == 0:
   # Make test plot
   plot_loss(test_losses, test_file)
+  plot_loss(test_accs, test_acc_file, "Accuracy")
