@@ -66,7 +66,7 @@ def get_params_grad(model):
         params.append(param)
         if param.grad is None:
             continue
-        grads.append(param.grad + 0.)
+        grads.append(param.grad.detach().requires_grad_(True) + 0.)
     return params, grads
 
 def hessian_vector_product(gradsH, params, v):
@@ -76,6 +76,8 @@ def hessian_vector_product(gradsH, params, v):
     params is the corresponding variables,
     v is the vector.
     """
-    hv = torch.autograd.grad(gradsH, params, grad_outputs = v, only_inputs = True, retain_graph = True)
+    hv = torch.autograd.grad(gradsH, params, grad_outputs = v, only_inputs = True, retain_graph = True, allow_unused=True)
+    # Not sure if this is incorrect, found that some of the gradients weren't used - just filled with randn
+    hv = [hv[i] if hv[i] is not None else torch.randn(v[i].size(), requires_grad=True) for i in range(len(hv))]
     return hv
 

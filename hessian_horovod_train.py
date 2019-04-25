@@ -21,6 +21,7 @@ large_ratio = 1
 max_large_ratio = 16
 max_eig = None
 decay_ratio = 2
+init_batch_size = 50
 batch_update_flag = True
 if max_large_ratio == 1:
     batch_update_flag = False
@@ -34,7 +35,7 @@ transform_train = transforms.Compose([
 # Partition dataset among workers using DistributedSampler
 train_dataset = datasets.CIFAR10(root='./datasets', train = True, download = True, transform = transform_train)
 train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=50, sampler=train_sampler, drop_last=True)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=init_batch_size, sampler=train_sampler, drop_last=True)
 
 test_dataset = datasets.CIFAR10(root='./datasets', train = False, download = True, transform = transform_train)
 test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset, num_replicas=hvd.size(), rank=hvd.rank())
@@ -71,16 +72,18 @@ test_losses = []
 criterion = nn.CrossEntropyLoss()
 testset_iterator = iter(test_loader)
 hessian_iterator = iter(hessian_loader)
-for epoch in range(1):
+for epoch in range(5):
     optimizer.set_backward_passes_per_step(large_ratio)
     large_batch_loss = 0
     for batch_idx, (data, target) in enumerate(train_loader):
+        if batch_idx == 1:
+            break
         inner_loop += 1
 
         model.train()
         output = model(data)
         loss = criterion(output, target)
-        large_batch_loss += loss.item() * target.size(0)
+        large_batch_loss += loss.item()
         loss.backward()
         if inner_loop % large_ratio == 0:
             num_updates += 1
@@ -121,10 +124,11 @@ for epoch in range(1):
         elif eig <= max_eig/decay_ratio:
             max_eig = eig
             large_ratio = int(large_ratio*decay_ratio)
-            adv_ratio /= decay_ratio
+            # adv_ratio /= decay_ratio
             if large_ratio  >= max_large_ratio:
                 large_ratio = max_large_ratio
                 batch_update_flag = False
+        print("Eigenvalue approximated at {}. Updated batch size is {}".format(eig, init_batch_size * large_ratio))
 
 def plot_loss(losses, file_name):
   data_file = "./results/" + file_name

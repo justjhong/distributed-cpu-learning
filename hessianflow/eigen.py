@@ -17,21 +17,25 @@ def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3):
     model.eval()
     """
 
+    model.eval()
+
     outputs = model(inputs)
     loss = criterion(outputs, targets)
-    loss.backward(create_graph = True)
+    loss = loss.detach().requires_grad_(True)
+    loss.backward(create_graph=True)
 
     params, gradsH = get_params_grad(model)
-    v = [torch.randn(p.size()) for p in params]
+    v = [torch.randn(p.size(), requires_grad=True) for p in params]
     v = normalization(v)
-    hvd.broadcast_variables(v, root_rank=0, name='random vector initialization')
+    hvd.broadcast_parameters(v, root_rank=0)
 
     eigenvalue = None
 
     for i in range(maxIter):
         model.zero_grad()
         Hv = hessian_vector_product(gradsH, params, v)
-        hvd.all_reduce(Hv, name='reduce random vector update')
+        for i in range(len(Hv)):
+            Hv[i] = hvd.allreduce(Hv[i], name='reduce random vector update')
         eigenvalue_tmp = group_product(Hv, v).item()
         v = normalization(Hv)
         if eigenvalue == None:
