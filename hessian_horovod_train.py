@@ -74,12 +74,10 @@ test_accs = []
 criterion = nn.CrossEntropyLoss()
 testset_iterator = iter(test_loader)
 hessian_iterator = iter(hessian_loader)
-for epoch in range(5):
+for epoch in range(30):
     optimizer.set_backward_passes_per_step(large_ratio)
     large_batch_loss = 0
     for batch_idx, (data, target) in enumerate(train_loader):
-        if batch_idx == 1:
-            break
         inner_loop += 1
 
         model.train()
@@ -100,7 +98,7 @@ for epoch in range(5):
             try:
                 inputs, labels = next(testset_iterator)
             except StopIteration:
-                testset_iterator = iter(testset_loader)
+                testset_iterator = iter(test_loader)
                 inputs, labels = next(testset_iterator)
             outputs = model(inputs)
             loss = criterion(outputs, labels)
@@ -134,7 +132,7 @@ for epoch in range(5):
         print("Eigenvalue approximated at {}. Updated batch size is {}".format(eig, init_batch_size * large_ratio))
 
 def plot_loss(losses, file_name, y_axis = "Loss"):
-  data_file = "./results/" + file_name
+  data_file = "./results/hessian/" + file_name
   plot_file = data_file + "_graph.png"
   f = open(data_file, "w")
   f.write("time, epoch, batch_idx, loss\n")
@@ -143,7 +141,7 @@ def plot_loss(losses, file_name, y_axis = "Loss"):
   f.close()
 
   # Plot loss vs time
-  plt.plot([loss[3] for loss in losses], [loss[0] for loss in losses], label=file_name)
+  plt.plot([loss[0] for loss in losses], [loss[3] for loss in losses], label=file_name)
   plt.ylabel(y_axis)
   plt.xlabel("Time in seconds")
   plt.savefig(plot_file)

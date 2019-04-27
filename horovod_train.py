@@ -4,6 +4,8 @@ import torch.nn as nn
 from torchvision import datasets, transforms
 from torchvision.models.squeezenet import *
 import horovod.torch as hvd
+import matplotlib.pyplot as plt
+import time
 
 # Initialize Horovod
 hvd.init()
@@ -44,9 +46,18 @@ optimizer.zero_grad()
 hvd.broadcast_parameters(model.state_dict(), root_rank=0)
 hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
+# Keep track of losses
+train_file = "train_loss_" + str(hvd.rank())
+test_file = "test_loss"
+test_acc_file = "test_acc"
+start_time = time.clock()
+train_losses = []
+test_losses = []
+test_accs = []
+
 criterion = nn.CrossEntropyLoss()
 testset_iterator = iter(test_loader)
-for epoch in range(1):
+for epoch in range(30):
    for batch_idx, (data, target) in enumerate(train_loader):
        model.train()
        output = model(data)
@@ -57,12 +68,13 @@ for epoch in range(1):
        if batch_idx % 25 == 0:
            print('Train Epoch: {} [{}/{}]\tLoss: {}'.format(
                epoch, batch_idx * len(data), len(train_sampler), loss.item()))
+           train_losses.append((time.clock() - start_time, epoch, batch_idx, loss.item()))
        if batch_idx % 100 == 0:
            model.eval()
            try:
                inputs, labels = next(testset_iterator)
            except StopIteration:
-               testset_iterator = iter(testset_loader)
+               testset_iterator = iter(test_loader)
                inputs, labels = next(testset_iterator)
            outputs = model(inputs)
            loss = criterion(outputs, labels)
@@ -74,3 +86,29 @@ for epoch in range(1):
            if hvd.rank() == 0:
                print("Test loss is {}".format(loss))
                print("Test accuracy is {}".format(accuracy))
+               test_losses.append((time.clock() - start_time, epoch, batch_idx, loss))
+               test_accs.append((time.clock() - start_time, epoch, batch_idx, accuracy))
+
+def plot_loss(losses, file_name, y_axis = "Loss"):
+  data_file = "./results/nonhessian/" + file_name
+  plot_file = data_file + "_graph.png"
+  f = open(data_file, "w")
+  f.write("time, epoch, batch_idx, loss\n")
+  for loss in losses:
+    f.write("{}, {}, {}, {}\n".format(loss[0], loss[1], loss[2], loss[3]))
+  f.close()
+
+  # Plot loss vs time
+  plt.plot([loss[0] for loss in losses], [loss[3] for loss in losses], label=file_name)
+  plt.ylabel(y_axis)
+  plt.xlabel("Time in seconds")
+  plt.savefig(plot_file)
+  plt.clf()
+
+# Make train plot
+plot_loss(train_losses, train_file)
+
+if hvd.rank() == 0:
+  # Make test plot
+  plot_loss(test_losses, test_file)
+  plot_loss(test_accs, test_acc_file, "Accuracy")

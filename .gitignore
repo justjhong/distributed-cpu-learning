@@ -1,4 +1,6 @@
 env/*
 datasets/
 __pycache__/
-results/*
+results/hessian/*
+results/nonhessian/*
+!*.gitkeep
