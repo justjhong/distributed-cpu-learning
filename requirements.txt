@@ -2,3 +2,5 @@ torch
 torchvision
 numpy
 scipy
+horovod
+matplotlib
