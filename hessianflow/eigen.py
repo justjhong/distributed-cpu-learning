@@ -1,8 +1,10 @@
 import torch
 import math
+import torch.optim as optim
 from torch.autograd import Variable
 import numpy as np
 import horovod.torch as hvd
+from torchvision.models.squeezenet import *
 
 from .utils import *
 
@@ -18,14 +20,17 @@ def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3):
     """
 
     model.eval()
+    # torch.no_grad()
 
+    #model_copy = squeezenet1_1(pretrained=False)
+    #model_copy.load_state_dict(model.state_dict())
+    #optimizer = optim.SGD(model_copy.parameters(), lr=0.001 * hvd.size(), momentum=0.9)
     outputs = model(inputs)
     loss = criterion(outputs, targets)
-    loss = loss.detach().requires_grad_(True)
     loss.backward(create_graph=True)
 
     params, gradsH = get_params_grad(model)
-    v = [torch.randn(p.size(), requires_grad=True) for p in params]
+    v = [torch.randn(p.size()) for p in params]
     v = normalization(v)
     hvd.broadcast_parameters(v, root_rank=0)
 
@@ -35,7 +40,7 @@ def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3):
         model.zero_grad()
         Hv = hessian_vector_product(gradsH, params, v)
         for i in range(len(Hv)):
-            Hv[i] = hvd.allreduce(Hv[i], name='reduce random vector update')
+            hvd.allreduce_(Hv[i], name='reduce random vector update')
         eigenvalue_tmp = group_product(Hv, v).item()
         v = normalization(Hv)
         if eigenvalue == None:

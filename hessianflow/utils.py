@@ -22,6 +22,7 @@ import torch
 import math
 from torch.autograd import Variable
 import numpy as np
+import horovod.torch as hvd
 
 
 def group_product(xs, ys):
@@ -66,7 +67,7 @@ def get_params_grad(model):
         params.append(param)
         if param.grad is None:
             continue
-        grads.append(param.grad.detach().requires_grad_(True) + 0.)
+        grads.append(param.grad + 0.)
     return params, grads
 
 def hessian_vector_product(gradsH, params, v):
@@ -76,8 +77,25 @@ def hessian_vector_product(gradsH, params, v):
     params is the corresponding variables,
     v is the vector.
     """
-    hv = torch.autograd.grad(gradsH, params, grad_outputs = v, only_inputs = True, retain_graph = True, allow_unused=True)
-    # Not sure if this is incorrect, found that some of the gradients weren't used - just filled with randn
-    hv = [hv[i] if hv[i] is not None else torch.randn(v[i].size(), requires_grad=True) for i in range(len(hv))]
-    return hv
+    hv = torch.autograd.grad(gradsH, params, grad_outputs = v, only_inputs = True, retain_graph = True)
+    return list(hv)
 
+def allreduce_parameters(params):
+    handles = []
+    if isinstance(params, dict):
+        params = sorted(params.items())
+    elif isinstance(params, list):
+        # support both named_parameters() and regular parameters()
+        params = [p if isinstance(p, tuple) else (None, p) for p in params]
+    else:
+        raise ValueError('invalid params of type: %s' % type(params))
+
+    # Run asynchronous broadcasts.
+    handles = []
+    for name, p in params:
+        handle = hvd.allreduce_async_(p, average=True, name=name)
+        handles.append(handle)
+
+    # Wait for completion.
+    for handle in handles:
+        hvd.synchronize(handle)

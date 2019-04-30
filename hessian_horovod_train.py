@@ -5,6 +5,7 @@ from torchvision import datasets, transforms
 from torchvision.models.squeezenet import *
 import horovod.torch as hvd
 from hessianflow.eigen import get_eigen
+from hessianflow.utils import allreduce_parameters
 import matplotlib.pyplot as plt
 import time
 
@@ -55,7 +56,7 @@ model = squeezenet1_1()
 optimizer = optim.SGD(model.parameters(), lr=0.001 * hvd.size(), momentum=0.9)
 
 # Add Horovod Distributed Optimizer
-optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
+# optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
 optimizer.zero_grad()
 
 # Broadcast parameters from rank 0 to all other processes.
@@ -75,9 +76,11 @@ criterion = nn.CrossEntropyLoss()
 testset_iterator = iter(test_loader)
 hessian_iterator = iter(hessian_loader)
 for epoch in range(30):
-    optimizer.set_backward_passes_per_step(large_ratio)
+    # optimizer.set_backward_passes_per_step(large_ratio)
     large_batch_loss = 0
     for batch_idx, (data, target) in enumerate(train_loader):
+        if batch_idx == 2:
+            break
         inner_loop += 1
 
         model.train()
@@ -88,6 +91,7 @@ for epoch in range(30):
         if inner_loop % large_ratio == 0:
             num_updates += 1
             optimizer.step()
+            allreduce_parameters(model.state_dict())
             optimizer.zero_grad()
             if batch_idx * large_ratio % 25 == 0:
                 print('Train Epoch: {} [{}/{}]\tLoss: {}'.format(epoch, batch_idx * len(data), len(train_sampler), large_batch_loss))
