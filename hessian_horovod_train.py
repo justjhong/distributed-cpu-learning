@@ -4,6 +4,7 @@ import torch.nn as nn
 from torchvision import datasets, transforms
 from torchvision.models.squeezenet import *
 import horovod.torch as hvd
+from hessianflow.optimizer.optm_utils import exp_lr_scheduler
 from hessianflow.eigen import get_eigen
 from hessianflow.utils import allreduce_parameters
 import matplotlib.pyplot as plt
@@ -79,8 +80,8 @@ for epoch in range(30):
     # optimizer.set_backward_passes_per_step(large_ratio)
     large_batch_loss = 0
     for batch_idx, (data, target) in enumerate(train_loader):
-        if batch_idx == 2:
-            break
+        # if batch_idx == 2:
+        #     break
         inner_loop += 1
 
         model.train()
@@ -128,12 +129,16 @@ for epoch in range(30):
             max_eig = eig
         elif eig <= max_eig/decay_ratio:
             max_eig = eig
+            prev_ratio = large_ratio
             large_ratio = int(large_ratio*decay_ratio)
             # adv_ratio /= decay_ratio
             if large_ratio  >= max_large_ratio:
                 large_ratio = max_large_ratio
                 batch_update_flag = False
+            optimizer = exp_lr_scheduler(optimizer, decay_ratio = large_ratio/prev_ratio)
         print("Eigenvalue approximated at {}. Updated batch size is {}".format(eig, init_batch_size * large_ratio))
+    # if epoch in lr_decay_epoch:
+    #     optimizer = exp_lr_scheduler(optimizer, decay_ratio = lr_decay_ratio)
 
 def plot_loss(losses, file_name, y_axis = "Loss"):
   data_file = "./results/hessian/" + file_name
