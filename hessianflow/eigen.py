@@ -9,7 +9,7 @@ from torchvision.models.squeezenet import *
 from .utils import *
 
 
-def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3):
+def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3, comm=True):
     """
     compute the top eigenvalues of model parameters and
     the corresponding eigenvectors.
@@ -32,15 +32,17 @@ def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3):
     params, gradsH = get_params_grad(model)
     v = [torch.randn(p.size()) for p in params]
     v = normalization(v)
-    hvd.broadcast_parameters(v, root_rank=0)
+    if comm:
+        hvd.broadcast_parameters(v, root_rank=0)
 
     eigenvalue = None
 
     for i in range(maxIter):
         model.zero_grad()
         Hv = hessian_vector_product(gradsH, params, v)
-        for i in range(len(Hv)):
-            hvd.allreduce_(Hv[i], name='reduce random vector update')
+        if comm:
+            for i in range(len(Hv)):
+                hvd.allreduce_(Hv[i], name='reduce random vector update')
         eigenvalue_tmp = group_product(Hv, v).item()
         v = normalization(Hv)
         if eigenvalue == None:
@@ -50,6 +52,13 @@ def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3):
                 return eigenvalue_tmp, v
             else:
                 eigenvalue = eigenvalue_tmp
+    if not comm:
+        eigenvalue = torch.FloatTensor([eigenvalue])
+        hvd.allreduce_(eigenvalue, name='eigenvalue')
+        for i in range(len(v)):
+            hvd.allreduce_(v[i], name='random vec')
+        eigenvalue = float(eigenvalue)
+        print("No Communication eigenvalue approximated at {}".format(eigenvalue))
     return eigenvalue, v
 
 def get_eigen_full_dataset(model, dataloader, criterion, maxIter = 50, tol = 1e-3):

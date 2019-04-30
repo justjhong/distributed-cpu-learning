@@ -68,10 +68,13 @@ hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 train_file = "train_loss_" + str(hvd.rank())
 test_file = "test_loss"
 test_acc_file = "test_acc"
+eig_file = "eig"
 start_time = time.clock()
 train_losses = []
 test_losses = []
 test_accs = []
+ref_eigs = []
+exp_eigs = []
 
 criterion = nn.CrossEntropyLoss()
 testset_iterator = iter(test_loader)
@@ -80,7 +83,7 @@ for epoch in range(30):
     # optimizer.set_backward_passes_per_step(large_ratio)
     large_batch_loss = 0
     for batch_idx, (data, target) in enumerate(train_loader):
-        # if batch_idx == 2:
+        # if batch_idx == 0:
         #     break
         inner_loop += 1
 
@@ -125,6 +128,10 @@ for epoch in range(30):
             hessian_iterator = iter(hessian_loader)
             inputs, labels = next(hessian_iterator)
         eig, _ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2)
+        ref_eigs.append(eig)
+        # for comparison for no communication averaging
+        exp_eig, exp_ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2, comm=False)
+        exp_eigs.append(exp_eig)
         if max_eig == None:
             max_eig = eig
         elif eig <= max_eig/decay_ratio:
@@ -156,6 +163,22 @@ def plot_loss(losses, file_name, y_axis = "Loss"):
   plt.savefig(plot_file)
   plt.clf()
 
+def plot_eigs(ref_eigs, exp_eigs, file_name):
+  data_file = "./results/hessian_eigs/" + file_name
+  plot_file = data_file + "_graph.png"
+  f = open(data_file, "w")
+  f.write("ref_eig, exp_eig\n")
+  for ref_eig, exp_eig in zip(ref_eigs, exp_eigs):
+    f.write("{}, {}\n".format(ref_eig, exp_eig))
+  f.close()
+
+  # Plot loss vs time
+  plt.plot(ref_eigs, exp_eigs, label=file_name)
+  plt.ylabel("No Communication Approximate Eigenvalue")
+  plt.xlabel("Communication Approximate Eigenvalue")
+  plt.savefig(plot_file)
+  plt.clf()
+
 # Make train plot
 plot_loss(train_losses, train_file)
 
@@ -163,3 +186,4 @@ if hvd.rank() == 0:
   # Make test plot
   plot_loss(test_losses, test_file)
   plot_loss(test_accs, test_acc_file, "Accuracy")
+  plot_eigs(ref_eigs, exp_eigs, eig_file)
