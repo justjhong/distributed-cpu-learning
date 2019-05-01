@@ -42,8 +42,11 @@ def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3, comm=
         model.zero_grad()
         Hv = hessian_vector_product(gradsH, params, v)
         if comm:
+            handles = []
             for i in range(len(Hv)):
-                hvd.allreduce_(Hv[i], name='reduce random vector update')
+                handles.append(hvd.allreduce_async_(Hv[i], name='reduce random vector update'))
+            for handle in handles:
+                hvd.synchronize(handle)
         eigenvalue_tmp = group_product(Hv, v).item()
         v = normalization(Hv)
         if eigenvalue == None:
