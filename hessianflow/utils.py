@@ -99,3 +99,9 @@ def allreduce_parameters(params):
     # Wait for completion.
     for handle in handles:
         hvd.synchronize(handle)
+
+def metric_average(val, name):
+    tensor = torch.tensor(val)
+    avg_tensor = hvd.allreduce(tensor, name=name)
+    return avg_tensor.item()
+

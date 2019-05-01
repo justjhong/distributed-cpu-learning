@@ -3,9 +3,16 @@ import torch.optim as optim
 import torch.nn as nn
 from torchvision import datasets, transforms
 from torchvision.models.squeezenet import *
+from hessianflow.utils import allreduce_parameters, metric_average
 import horovod.torch as hvd
 import matplotlib.pyplot as plt
+import argparse
 import time
+
+parser = argparse.ArgumentParser(description='Various hyperparam settings')
+parser.add_argument('--comm-interval', type = int, default = 1, metavar = 'CI',
+                    help = 'minibatches until the models synchronize')
+args = parser.parse_args()
 
 # Initialize Horovod
 hvd.init()
@@ -28,18 +35,11 @@ test_dataset = datasets.CIFAR10(root='./datasets', train = False, download = Tru
 test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset, num_replicas=hvd.size(), rank=hvd.rank())
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=200, sampler=test_sampler)
 
-def metric_average(val, name):
-    tensor = torch.tensor(val)
-    avg_tensor = hvd.allreduce(tensor, name=name)
-    return avg_tensor.item()
-
 # Build model...
 model = squeezenet1_1()
 
 optimizer = optim.SGD(model.parameters(), lr=0.001 * hvd.size(), momentum=0.9)
-
-# Add Horovod Distributed Optimizer
-optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
+# optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
 optimizer.zero_grad()
 
 # Broadcast parameters from rank 0 to all other processes.
@@ -57,37 +57,41 @@ test_accs = []
 
 criterion = nn.CrossEntropyLoss()
 testset_iterator = iter(test_loader)
+num_updates = 0
 for epoch in range(30):
-   for batch_idx, (data, target) in enumerate(train_loader):
-       model.train()
-       output = model(data)
-       loss = criterion(output, target)
-       loss.backward()
-       optimizer.step()
-       optimizer.zero_grad()
-       if batch_idx % 25 == 0:
-           print('Train Epoch: {} [{}/{}]\tLoss: {}'.format(
-               epoch, batch_idx * len(data), len(train_sampler), loss.item()))
-           train_losses.append((time.clock() - start_time, epoch, batch_idx, loss.item()))
-       if batch_idx % 100 == 0:
-           model.eval()
-           try:
-               inputs, labels = next(testset_iterator)
-           except StopIteration:
-               testset_iterator = iter(test_loader)
-               inputs, labels = next(testset_iterator)
-           outputs = model(inputs)
-           loss = criterion(outputs, labels)
-           accuracy = outputs.data.max(1)[1].eq(labels).sum().item() / outputs.data.shape[0]
+    for batch_idx, (data, target) in enumerate(train_loader):
+        model.train()
+        output = model(data)
+        loss = criterion(output, target)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        num_updates += 1
+        if num_updates % args.comm_interval == args.comm_interval - 1:
+            allreduce_parameters(model.state_dict())
+        if batch_idx % 25 == 0:
+            print('Train Epoch: {} [{}/{}]\tLoss: {}'.format(
+                epoch, batch_idx * len(data), len(train_sampler), loss.item()))
+            train_losses.append((time.clock() - start_time, epoch, batch_idx, loss.item()))
+        if batch_idx % 100 == 0:
+            model.eval()
+            try:
+                inputs, labels = next(testset_iterator)
+            except StopIteration:
+                testset_iterator = iter(test_loader)
+                inputs, labels = next(testset_iterator)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            accuracy = outputs.data.max(1)[1].eq(labels).sum().item() / outputs.data.shape[0]
 
-           loss = metric_average(loss, 'avg_loss')
-           accuracy = metric_average(accuracy, 'avg_accuracy')
+            loss = metric_average(loss, 'avg_loss')
+            accuracy = metric_average(accuracy, 'avg_accuracy')
 
-           if hvd.rank() == 0:
-               print("Test loss is {}".format(loss))
-               print("Test accuracy is {}".format(accuracy))
-               test_losses.append((time.clock() - start_time, epoch, batch_idx, loss))
-               test_accs.append((time.clock() - start_time, epoch, batch_idx, accuracy))
+            if hvd.rank() == 0:
+                print("Test loss is {}".format(loss))
+                print("Test accuracy is {}".format(accuracy))
+                test_losses.append((time.clock() - start_time, epoch, batch_idx, loss))
+                test_accs.append((time.clock() - start_time, epoch, batch_idx, accuracy))
 
 def plot_loss(losses, file_name, y_axis = "Loss"):
   data_file = "./results/nonhessian/" + file_name
