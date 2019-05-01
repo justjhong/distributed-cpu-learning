@@ -127,8 +127,8 @@ for epoch in range(30):
         except StopIteration:
             hessian_iterator = iter(hessian_loader)
             inputs, labels = next(hessian_iterator)
-        eig, _ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2)
-        ref_eigs.append(eig)
+        #eig, _ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2)
+        #ref_eigs.append(eig)
         # for comparison for no communication averaging
         exp_eig, exp_ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2, comm=False)
         exp_eigs.append(exp_eig)

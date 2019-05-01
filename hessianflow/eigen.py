@@ -38,6 +38,7 @@ def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3, comm=
     eigenvalue = None
 
     for i in range(maxIter):
+        print(i)
         model.zero_grad()
         Hv = hessian_vector_product(gradsH, params, v)
         if comm:
@@ -53,12 +54,17 @@ def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3, comm=
             else:
                 eigenvalue = eigenvalue_tmp
     if not comm:
+        print("{} is here".format(hvd.rank()))
+        handles = []
         eigenvalue = torch.FloatTensor([eigenvalue])
-        hvd.allreduce_(eigenvalue, name='eigenvalue')
+        handles.append(hvd.allreduce_async_(eigenvalue, name='eigenvalue'))
         for i in range(len(v)):
-            hvd.allreduce_(v[i], name='random vec')
+            handles.append(hvd.allreduce_(v[i], name='random vec'))
+        for handle in handles:
+            hvd.synchronize(handle)
         eigenvalue = float(eigenvalue)
-        print("No Communication eigenvalue approximated at {}".format(eigenvalue))
+        if hvd.rank() == 0:
+            print("No Communication eigenvalue approximated at {}".format(eigenvalue))
     return eigenvalue, v
 
 def get_eigen_full_dataset(model, dataloader, criterion, maxIter = 50, tol = 1e-3):
