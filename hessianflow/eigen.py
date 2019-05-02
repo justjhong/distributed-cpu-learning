@@ -44,7 +44,7 @@ def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3, comm=
         if comm:
             handles = []
             for i in range(len(Hv)):
-                handles.append(hvd.allreduce_async_(Hv[i], name='reduce random vector update'))
+                handles.append(hvd.allreduce_async_(Hv[i], name='reduce random vector update {}'.format(i)))
             for handle in handles:
                 hvd.synchronize(handle)
         eigenvalue_tmp = group_product(Hv, v).item()
@@ -53,18 +53,15 @@ def get_eigen(model, inputs, targets, criterion, maxIter = 50, tol = 1e-3, comm=
             eigenvalue = eigenvalue_tmp
         else:
             if abs(eigenvalue-eigenvalue_tmp) < tol:
-                return eigenvalue_tmp, v
+                if comm:
+                    return eigenvalue_tmp, v
             else:
                 eigenvalue = eigenvalue_tmp
     if not comm:
         print("{} is here".format(hvd.rank()))
-        handles = []
         eigenvalue = torch.FloatTensor([eigenvalue])
-        handles.append(hvd.allreduce_async_(eigenvalue, name='eigenvalue'))
-        for i in range(len(v)):
-            handles.append(hvd.allreduce_(v[i], name='random vec'))
-        for handle in handles:
-            hvd.synchronize(handle)
+        hvd.allreduce_(eigenvalue, name='eigenvalue')
+        print("allreduced eigs for rank {}".format(hvd.rank()))
         eigenvalue = float(eigenvalue)
         if hvd.rank() == 0:
             print("No Communication eigenvalue approximated at {}".format(eigenvalue))

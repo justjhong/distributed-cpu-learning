@@ -65,10 +65,10 @@ hvd.broadcast_parameters(model.state_dict(), root_rank=0)
 hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
 # Keep track of losses
-train_file = "train_loss_" + str(hvd.rank())
-test_file = "test_loss"
-test_acc_file = "test_acc"
-eig_file = "eig"
+train_file = "train_loss_rank-{}_comm-{}_bmult-{}".format(str(hvd.rank()), str(args.comm_interval), str(args.batch_mult))
+test_file = "test_loss_rank-{}_comm-{}_bmult-{}".format(str(hvd.rank()), str(args.comm_interval), str(args.batch_mult))
+test_acc_file = "test_acc_rank-{}_comm-{}_bmult-{}".format(str(hvd.rank()), str(args.comm_interval), str(args.batch_mult))
+eig_file = "eig_rank-{}_comm-{}_bmult-{}".format(str(hvd.rank()), str(args.comm_interval), str(args.batch_mult))
 start_time = time.clock()
 train_losses = []
 test_losses = []
@@ -130,8 +130,8 @@ for epoch in range(30):
         except StopIteration:
             hessian_iterator = iter(hessian_loader)
             inputs, labels = next(hessian_iterator)
-        #eig, _ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2)
-        #ref_eigs.append(eig)
+        eig, _ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2)
+        ref_eigs.append(eig)
         # for comparison for no communication averaging
         exp_eig, exp_ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2, comm=False)
         exp_eigs.append(exp_eig)
@@ -152,35 +152,21 @@ for epoch in range(30):
 
 def plot_loss(losses, file_name, y_axis = "Loss"):
   data_file = "./results/hessian/" + file_name
-  plot_file = data_file + "_graph.png"
+
   f = open(data_file, "w")
   f.write("time, epoch, batch_idx, loss\n")
   for loss in losses:
     f.write("{}, {}, {}, {}\n".format(loss[0], loss[1], loss[2], loss[3]))
   f.close()
 
-  # Plot loss vs time
-  plt.plot([loss[0] for loss in losses], [loss[3] for loss in losses], label=file_name)
-  plt.ylabel(y_axis)
-  plt.xlabel("Time in seconds")
-  plt.savefig(plot_file)
-  plt.clf()
-
 def plot_eigs(ref_eigs, exp_eigs, file_name):
   data_file = "./results/hessian_eigs/" + file_name
-  plot_file = data_file + "_graph.png"
+  
   f = open(data_file, "w")
   f.write("ref_eig, exp_eig\n")
   for ref_eig, exp_eig in zip(ref_eigs, exp_eigs):
     f.write("{}, {}\n".format(ref_eig, exp_eig))
   f.close()
-
-  # Plot loss vs time
-  plt.plot(ref_eigs, exp_eigs, label=file_name)
-  plt.ylabel("No Communication Approximate Eigenvalue")
-  plt.xlabel("Communication Approximate Eigenvalue")
-  plt.savefig(plot_file)
-  plt.clf()
 
 # Make train plot
 plot_loss(train_losses, train_file)
