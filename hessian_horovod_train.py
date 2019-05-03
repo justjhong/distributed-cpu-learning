@@ -32,7 +32,7 @@ large_ratio = 1
 max_large_ratio = 16
 max_eig = None
 decay_ratio = 2
-init_batch_size = 64
+init_batch_size = 128 // hvd.size()
 batch_update_flag = True
 if max_large_ratio == 1:
     batch_update_flag = False
@@ -56,7 +56,7 @@ hessian_loader = torch.utils.data.DataLoader(train_dataset, batch_size = 128, sh
 # Build model...
 model = squeezenet1_1()
 
-optimizer = optim.SGD(model.parameters(), lr=0.001 * hvd.size(), momentum=0.9)
+optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
 # Add Horovod Distributed Optimizer
 # optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())

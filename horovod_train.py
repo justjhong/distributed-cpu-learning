@@ -30,7 +30,7 @@ train_dataset = datasets.CIFAR10(root='./datasets', train = True, download = Tru
 # Partition dataset among workers using DistributedSampler
 train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
 
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, sampler=train_sampler)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128 // hvd.size(), sampler=train_sampler)
 
 test_dataset = datasets.CIFAR10(root='./datasets', train = False, download = True, transform = transform_train)
 test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset, num_replicas=hvd.size(), rank=hvd.rank())
@@ -39,7 +39,7 @@ test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=256, sampler=
 # Build model...
 model = squeezenet1_1()
 
-optimizer = optim.SGD(model.parameters(), lr=0.001 * hvd.size(), momentum=0.9)
+optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 # optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
 optimizer.zero_grad()
 
