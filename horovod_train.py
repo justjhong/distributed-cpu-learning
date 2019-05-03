@@ -73,8 +73,9 @@ for epoch in range(30):
         if batch_idx % 25 == 0:
             print('Train Epoch: {} [{}/{}]\tLoss: {}'.format(
                 epoch, batch_idx * len(data), len(train_sampler), loss.item()))
-            cur_batch_loss = loss.item()
+            cur_batch_loss = torch.FloatTensor([loss.item()])
             hvd.allreduce_(cur_batch_loss)
+            cur_batch_loss = float(cur_batch_loss)
             train_losses.append((time.clock() - start_time, epoch, batch_idx, cur_batch_loss))
         if batch_idx % 100 == 0:
             model.eval()

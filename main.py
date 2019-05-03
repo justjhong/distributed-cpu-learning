@@ -18,4 +18,7 @@ cmds = [
         ]
 
 for cmd in cmds:
-    subprocess.run(cmd)
+    try:
+        subprocess.run(cmd)
+    except Exception as e:
+        break
