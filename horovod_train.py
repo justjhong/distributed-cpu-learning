@@ -30,11 +30,11 @@ train_dataset = datasets.CIFAR10(root='./datasets', train = True, download = Tru
 # Partition dataset among workers using DistributedSampler
 train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
 
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=50, sampler=train_sampler)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, sampler=train_sampler)
 
 test_dataset = datasets.CIFAR10(root='./datasets', train = False, download = True, transform = transform_train)
 test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset, num_replicas=hvd.size(), rank=hvd.rank())
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=200, sampler=test_sampler)
+test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=256, sampler=test_sampler)
 
 # Build model...
 model = squeezenet1_1()
@@ -73,7 +73,9 @@ for epoch in range(30):
         if batch_idx % 25 == 0:
             print('Train Epoch: {} [{}/{}]\tLoss: {}'.format(
                 epoch, batch_idx * len(data), len(train_sampler), loss.item()))
-            train_losses.append((time.clock() - start_time, epoch, batch_idx, loss.item()))
+            cur_batch_loss = loss.item()
+            hvd.allreduce_(cur_batch_loss)
+            train_losses.append((time.clock() - start_time, epoch, batch_idx, cur_batch_loss))
         if batch_idx % 100 == 0:
             model.eval()
             try:
@@ -95,25 +97,25 @@ for epoch in range(30):
                 test_accs.append((time.clock() - start_time, epoch, batch_idx, accuracy))
 
 def plot_loss(losses, file_name, y_axis = "Loss"):
-  data_file = "./results/nonhessian/" + file_name
-  plot_file = data_file + "_graph.png"
-  f = open(data_file, "w")
-  f.write("time, epoch, batch_idx, loss\n")
-  for loss in losses:
-    f.write("{}, {}, {}, {}\n".format(loss[0], loss[1], loss[2], loss[3]))
-  f.close()
+    data_file = "./results/nonhessian/" + file_name
+    plot_file = data_file + "_graph.png"
+    f = open(data_file, "w")
+    f.write("time, epoch, batch_idx, loss\n")
+    for loss in losses:
+        f.write("{}, {}, {}, {}\n".format(loss[0], loss[1], loss[2], loss[3]))
+    f.close()
 
-  # Plot loss vs time
-  plt.plot([loss[0] for loss in losses], [loss[3] for loss in losses], label=file_name)
-  plt.ylabel(y_axis)
-  plt.xlabel("Time in seconds")
-  plt.savefig(plot_file)
-  plt.clf()
+    # Plot loss vs time
+    plt.plot([loss[0] for loss in losses], [loss[3] for loss in losses], label=file_name)
+    plt.ylabel(y_axis)
+    plt.xlabel("Time in seconds")
+    plt.savefig(plot_file)
+    plt.clf()
 
-# Make train plot
-plot_loss(train_losses, train_file)
 
 if hvd.rank() == 0:
-  # Make test plot
-  plot_loss(test_losses, test_file)
-  plot_loss(test_accs, test_acc_file, "Accuracy")
+    # Make train plot
+    plot_loss(train_losses, train_file)
+    # Make test plot
+    plot_loss(test_losses, test_file)
+    plot_loss(test_accs, test_acc_file, "Accuracy")

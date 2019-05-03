@@ -32,7 +32,7 @@ large_ratio = 1
 max_large_ratio = 16
 max_eig = None
 decay_ratio = 2
-init_batch_size = 50
+init_batch_size = 64
 batch_update_flag = True
 if max_large_ratio == 1:
     batch_update_flag = False
@@ -49,7 +49,7 @@ train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=init_batch_
 
 test_dataset = datasets.CIFAR10(root='./datasets', train = False, download = True, transform = transform_train)
 test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset, num_replicas=hvd.size(), rank=hvd.rank())
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=200, sampler=test_sampler, drop_last=True)
+test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=256, sampler=test_sampler, drop_last=True)
 
 hessian_loader = torch.utils.data.DataLoader(train_dataset, batch_size = 128, shuffle = True)
 
