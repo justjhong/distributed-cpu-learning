@@ -16,6 +16,8 @@ parser.add_argument('--comm-interval', type = int, default = 1, metavar = 'CI',
                     help = 'minibatches until the models synchronize')
 parser.add_argument('--batch-mult', type = int, default = 1, metavar = 'BM',
                     help = 'ratio at which batch size will increase relative to eigenvalue decrease')
+parser.add_argument('--eig-comm', type=int, default=1, metavar='EC', help = 'Whether communication is used for eigenvalue computation every time')
+parser.add_argument('--num-cores', type=int, default=16, metavar='T', help = 'num cores used, but does not do anything, just for file naming')
 args = parser.parse_args()
 
 # Initialize Horovod
@@ -65,10 +67,10 @@ hvd.broadcast_parameters(model.state_dict(), root_rank=0)
 hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
 # Keep track of losses
-train_file = "train_loss_rank-{}_comm-{}_bmult-{}".format(str(hvd.rank()), str(args.comm_interval), str(args.batch_mult))
-test_file = "test_loss_rank-{}_comm-{}_bmult-{}".format(str(hvd.rank()), str(args.comm_interval), str(args.batch_mult))
-test_acc_file = "test_acc_rank-{}_comm-{}_bmult-{}".format(str(hvd.rank()), str(args.comm_interval), str(args.batch_mult))
-eig_file = "eig_rank-{}_comm-{}_bmult-{}".format(str(hvd.rank()), str(args.comm_interval), str(args.batch_mult))
+train_file = "train_loss_comm-{}_bmult-{}_cores-{}_eig-comm-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm))
+test_file = "test_loss_comm-{}_bmult-{}_cores-{}_eig-comm-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm))
+test_acc_file = "test_acc_comm-{}_bmult-{}_cores-{}_eig-comm-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm))
+eig_file = "eig_comm-{}_bmult-{}_cores-{}_eig-comm-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm))
 start_time = time.clock()
 train_losses = []
 test_losses = []
@@ -102,7 +104,9 @@ for epoch in range(30):
                 allreduce_parameters(model.state_dict())
             if batch_idx * large_ratio % 25 == 0:
                 print('Train Epoch: {} [{}/{}]\tLoss: {}'.format(epoch, batch_idx * len(data), len(train_sampler), large_batch_loss))
-                train_losses.append((time.clock() - start_time, epoch, batch_idx, loss.item()))
+                cur_batch_loss = loss.item()
+                hvd.allreduce_(cur_batch_loss)
+                train_losses.append((time.clock() - start_time, epoch, batch_idx, cur_batch_loss))
             large_batch_loss = 0
         if batch_idx % 100 == 0:
             model.eval()
@@ -133,8 +137,8 @@ for epoch in range(30):
         eig, _ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2)
         ref_eigs.append(eig)
         # for comparison for no communication averaging
-        exp_eig, exp_ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2, comm=False)
-        exp_eigs.append(exp_eig)
+        # exp_eig, exp_ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2, comm=False)
+        # exp_eigs.append(exp_eig)
         if max_eig == None:
             max_eig = eig
         elif eig <= max_eig/decay_ratio:
@@ -151,28 +155,27 @@ for epoch in range(30):
     #     optimizer = exp_lr_scheduler(optimizer, decay_ratio = lr_decay_ratio)
 
 def plot_loss(losses, file_name, y_axis = "Loss"):
-  data_file = "./results/hessian/" + file_name
+    data_file = "./results/hessian/" + file_name
 
-  f = open(data_file, "w")
-  f.write("time, epoch, batch_idx, loss\n")
-  for loss in losses:
-    f.write("{}, {}, {}, {}\n".format(loss[0], loss[1], loss[2], loss[3]))
-  f.close()
+    f = open(data_file, "w")
+    f.write("time, epoch, batch_idx, loss\n")
+    for loss in losses:
+        f.write("{}, {}, {}, {}\n".format(loss[0], loss[1], loss[2], loss[3]))
+    f.close()
 
 def plot_eigs(ref_eigs, exp_eigs, file_name):
-  data_file = "./results/hessian_eigs/" + file_name
-  
-  f = open(data_file, "w")
-  f.write("ref_eig, exp_eig\n")
-  for ref_eig, exp_eig in zip(ref_eigs, exp_eigs):
-    f.write("{}, {}\n".format(ref_eig, exp_eig))
-  f.close()
+    data_file = "./results/hessian_eigs/" + file_name
+    f = open(data_file, "w")
+    f.write("ref_eig, exp_eig\n")
+    for ref_eig, exp_eig in zip(ref_eigs, exp_eigs):
+        f.write("{}, {}\n".format(ref_eig, exp_eig))
+    f.close()
 
-# Make train plot
-plot_loss(train_losses, train_file)
 
 if hvd.rank() == 0:
-  # Make test plot
-  plot_loss(test_losses, test_file)
-  plot_loss(test_accs, test_acc_file, "Accuracy")
-  plot_eigs(ref_eigs, exp_eigs, eig_file)
+    # Make train plot
+    plot_loss(train_losses, train_file)
+    # Make test plot
+    plot_loss(test_losses, test_file)
+    plot_loss(test_accs, test_acc_file, "Accuracy")
+    # plot_eigs(ref_eigs, exp_eigs, eig_file)

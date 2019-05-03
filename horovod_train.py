@@ -12,6 +12,7 @@ import time
 parser = argparse.ArgumentParser(description='Various hyperparam settings')
 parser.add_argument('--comm-interval', type = int, default = 1, metavar = 'CI',
                     help = 'minibatches until the models synchronize')
+parser.add_argument('--num-cores', type=int, default=16, metavar='T', help = 'num cores used, but does not do anything, just for file naming')
 args = parser.parse_args()
 
 # Initialize Horovod
@@ -47,9 +48,9 @@ hvd.broadcast_parameters(model.state_dict(), root_rank=0)
 hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
 # Keep track of losses
-train_file = "train_loss_" + str(hvd.rank())
-test_file = "test_loss"
-test_acc_file = "test_acc"
+train_file = "train_loss_cores-{}_comm-{}".format(str(args.num_cores), str(args.comm_interval))
+test_file = "test_loss_cores-{}_comm-{}".format(str(args.num_cores), str(args.comm_interval))
+test_acc_file = "test_acc_cores-{}_comm-{}".format(str(args.num_cores), str(args.comm_interval))
 start_time = time.clock()
 train_losses = []
 test_losses = []
