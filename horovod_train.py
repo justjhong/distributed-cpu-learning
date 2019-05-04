@@ -13,6 +13,7 @@ parser = argparse.ArgumentParser(description='Various hyperparam settings')
 parser.add_argument('--comm-interval', type = int, default = 1, metavar = 'CI',
                     help = 'minibatches until the models synchronize')
 parser.add_argument('--num-cores', type=int, default=16, metavar='T', help = 'num cores used, but does not do anything, just for file naming')
+parser.add_argument('--lr', type=float, default=.001, metavar='LR', help = 'learning rate')
 args = parser.parse_args()
 
 # Initialize Horovod
@@ -39,7 +40,7 @@ test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=256, sampler=
 # Build model...
 model = squeezenet1_1()
 
-optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
 # optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
 optimizer.zero_grad()
 
@@ -48,9 +49,9 @@ hvd.broadcast_parameters(model.state_dict(), root_rank=0)
 hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
 # Keep track of losses
-train_file = "train_loss_cores-{}_comm-{}".format(str(args.num_cores), str(args.comm_interval))
-test_file = "test_loss_cores-{}_comm-{}".format(str(args.num_cores), str(args.comm_interval))
-test_acc_file = "test_acc_cores-{}_comm-{}".format(str(args.num_cores), str(args.comm_interval))
+train_file = "train_loss_cores-{}_comm-{}_lr-{}".format(str(args.num_cores), str(args.comm_interval), str(args.lr))
+test_file = "test_loss_cores-{}_comm-{}_lr-{}".format(str(args.num_cores), str(args.comm_interval), str(args.lr))
+test_acc_file = "test_acc_cores-{}_comm-{}_lr-{}".format(str(args.num_cores), str(args.comm_interval), str(args.lr))
 start_time = time.clock()
 train_losses = []
 test_losses = []
