@@ -17,6 +17,7 @@ parser.add_argument('--batch-mult', type = int, default = 1, metavar = 'BM',
 parser.add_argument('--eig-comm', type=int, default=1, metavar='EC', help = 'Whether communication is used for eigenvalue computation every time')
 parser.add_argument('--num-cores', type=int, default=1, metavar='T', help = 'num cores used, but does not do anything, just for file naming')
 parser.add_argument('--init-batch-size', type=int, default=64, metavar='BS', help = 'initial batch size')
+parser.add_argument('--lr', type=float, default=.001, metavar='LR', help = 'learning rate')
 args = parser.parse_args()
 
 # HessianFlow initialization
@@ -27,6 +28,8 @@ max_eig = None
 decay_ratio = 2
 init_batch_size = args.init_batch_size
 batch_update_flag = True
+duration=10
+cur_duration=0
 if max_large_ratio == 1:
     batch_update_flag = False
 
@@ -47,15 +50,15 @@ hessian_loader = torch.utils.data.DataLoader(train_dataset, batch_size = 128, sh
 # Build model...
 model = squeezenet1_1()
 
-optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
 
 optimizer.zero_grad()
 
 # Keep track of losses
-train_file = "train_loss_comm-{}_bmult-{}_cores-{}_eig-comm-{}_init-batch-size-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm), str(args.init_batch_size))
-test_file = "test_loss_comm-{}_bmult-{}_cores-{}_eig-comm-{}_init-batch-size-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm), str(args.init_batch_size))
-test_acc_file = "test_acc_comm-{}_bmult-{}_cores-{}_eig-comm-{}_init-batch-size-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm), str(args.init_batch_size))
-eig_file = "eig_comm-{}_bmult-{}_cores-{}_eig-comm-{}_init-batch-size-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm), str(args.init_batch_size))
+train_file = "train_loss_comm-{}_bmult-{}_cores-{}_eig-comm-{}_init-batch-size-{}_lr-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm), str(args.init_batch_size), str(args.lr))
+test_file = "test_loss_comm-{}_bmult-{}_cores-{}_eig-comm-{}_init-batch-size-{}_lr-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm), str(args.init_batch_size), str(args.lr))
+test_acc_file = "test_acc_comm-{}_bmult-{}_cores-{}_eig-comm-{}_init-batch-size-{}_lr-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm), str(args.init_batch_size), str(args.lr))
+eig_file = "eig_comm-{}_bmult-{}_cores-{}_eig-comm-{}_init-batch-size-{}_lr-{}".format(str(args.comm_interval), str(args.batch_mult), str(args.num_cores), str(args.eig_comm), str(args.init_batch_size), str(args.lr))
 start_time = time.clock()
 train_losses = []
 test_losses = []
@@ -111,6 +114,7 @@ for epoch in range(30):
         except StopIteration:
             hessian_iterator = iter(hessian_loader)
             inputs, labels = next(hessian_iterator)
+        cur_duration+=1
         eig, _ = get_eigen(model, inputs, labels, criterion, maxIter=10, tol= 1e-2)
         ref_eigs.append(eig)
         if max_eig == None:
@@ -123,8 +127,20 @@ for epoch in range(30):
             if large_ratio  >= max_large_ratio:
                 large_ratio = max_large_ratio
                 batch_update_flag = False
+            cur_duration=0
             optimizer = exp_lr_scheduler(optimizer, decay_ratio = large_ratio/prev_ratio)
         print("Eigenvalue approximated at {}. Updated batch size is {}".format(eig, init_batch_size * large_ratio))
+    # if it is around a quadratic bowl, increase batch size
+    # ensure the learning rate is not too crazy, espeacially for model without batch normalization
+    if cur_duration - duration > -0.5:
+        prev_ratio = large_ratio
+        large_ratio = int(large_ratio*decay_ratio*args.batch_mult)
+        if large_ratio  >= max_large_ratio:
+            large_ratio = max_large_ratio
+            batch_update_flag = False
+        cur_duration = 0
+        optimizer = exp_lr_scheduler(optimizer, decay_ratio = large_ratio/prev_ratio)
+
     # if epoch in lr_decay_epoch:
     #     optimizer = exp_lr_scheduler(optimizer, decay_ratio = lr_decay_ratio)
 
@@ -140,9 +156,12 @@ def plot_loss(losses, file_name, y_axis = "Loss"):
 def plot_eigs(ref_eigs, exp_eigs, file_name):
     data_file = "./results/hessian_eigs/" + file_name
     f = open(data_file, "w")
-    f.write("ref_eig, exp_eig\n")
-    for ref_eig, exp_eig in zip(ref_eigs, exp_eigs):
-        f.write("{}, {}\n".format(ref_eig, exp_eig))
+    f.write("ref_eig\n")
+    for ref_eig in ref_eigs:
+        f.write("{}\n".format(ref_eig))
+    # f.write("ref_eig, exp_eig\n")
+    # for ref_eig, exp_eig in zip(ref_eigs, exp_eigs):
+    #     f.write("{}, {}\n".format(ref_eig, exp_eig))
     f.close()
 
 
@@ -151,4 +170,4 @@ plot_loss(train_losses, train_file)
 # Make test plot
 plot_loss(test_losses, test_file)
 plot_loss(test_accs, test_acc_file, "Accuracy")
-# plot_eigs(ref_eigs, exp_eigs, eig_file)
+plot_eigs(ref_eigs, exp_eigs, eig_file)
